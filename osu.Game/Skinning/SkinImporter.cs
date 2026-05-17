@@ -162,13 +162,20 @@ namespace osu.Game.Skinning
 
         public void UpdateSkinIniMetadata(SkinInfo item, Realm realm)
         {
+            string commentLine = @"// The following content was automatically added by osu! in order to use metadata that more closely matches user expectations.";
             string nameLine = @$"Name: {item.Name}";
             string authorLine = @$"Author: {item.Creator}";
 
             List<string> newLines = new List<string>
             {
-                @"// The following content was automatically added by osu! in order to use metadata that more closely matches user expectations.",
+                commentLine,
                 @"[General]",
+                nameLine,
+                authorLine,
+            };
+
+            List<string> newLinesUpdateCase = new List<string>
+            {
                 nameLine,
                 authorLine,
             };
@@ -194,15 +201,57 @@ namespace osu.Game.Skinning
                         using (var existingStream = Files.Storage.GetStream(existingFile.File.GetStoragePath()))
                         using (var sr = new StreamReader(existingStream))
                         {
-                            string? line;
-                            while ((line = sr.ReadLine()) != null)
-                                sw.WriteLine(line);
+                            string content = sr.ReadToEnd();
+                            string[] lines = content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                            bool firstGeneralSectionFound = false;
+                            bool firstCommentLineFound = false;
+
+                            foreach (string rawLine in lines)
+                            {
+                                string line = rawLine.Trim();
+                                if (line.Equals(commentLine, StringComparison.Ordinal))
+                                {
+                                    if (!firstCommentLineFound)
+                                    {
+                                        firstCommentLineFound = true;
+                                        sw.WriteLine(line);
+                                    }
+                                    continue;
+                                }
+
+                                if (line.Equals(@"[General]", StringComparison.Ordinal))
+                                {
+                                    if (!firstGeneralSectionFound)
+                                    {
+                                        firstGeneralSectionFound = true;
+                                        sw.WriteLine(line);
+
+                                        // insert the new metadata lines after the first [General] section header, replacing any existing name and author lines.
+                                        foreach (string nline in newLinesUpdateCase)
+                                            sw.WriteLine(nline);
+                                    }
+                                    continue;
+                                }
+
+                                if (line.StartsWith(@"Name:", StringComparison.Ordinal) ||
+                                    line.StartsWith(@"Author:", StringComparison.Ordinal))
+                                {
+                                    // skip these lines as they are being replaced.
+                                    continue;
+                                }
+
+                                sw.WriteLine(rawLine);
+                            }
+
+                            // if no [General] section found, add the section at the end.
+                            if (!firstGeneralSectionFound)
+                            {
+                                sw.WriteLine();
+                                foreach (string nline in newLines)
+                                    sw.WriteLine(nline);
+                            }
+
                         }
-
-                        sw.WriteLine();
-
-                        foreach (string line in newLines)
-                            sw.WriteLine(line);
                     }
 
                     modelManager.ReplaceFile(existingFile, stream, realm);

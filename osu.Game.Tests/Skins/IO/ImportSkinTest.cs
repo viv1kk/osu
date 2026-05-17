@@ -383,6 +383,60 @@ namespace osu.Game.Tests.Skins.IO
             }
         }
 
+        [Test]
+        public Task TestSkinIniGeneralSectionNotDuplicatedOnImport() => runSkinTest(async osu =>
+        {
+            string skinName = "Test Name";
+            string skinAuthor = "Test Author";
+            string filename = "skin.osk";
+
+            var import = await loadSkinIntoOsu(osu, new ImportTask(createOskWithIni(skinName, skinAuthor), filename));
+
+            var storage = osu.Dependencies.Get<Storage>();
+            var fileStorage = storage.GetStorageForDirectory("files");
+
+            import.PerformRead(s =>
+            {
+                var skinFile = s.Files.FirstOrDefault(f => f.Filename == "skin.ini");
+                Assert.That(skinFile, Is.Not.Null, "skin.ini file should exist");
+
+                using (var stream = fileStorage.GetStream(skinFile!.File.GetStoragePath()))
+                using (var reader = new LineBufferedReader(stream))
+                {
+                    var decoder = new LegacySkinDecoder();
+                    var config = decoder.Decode(reader);
+
+                    Assert.That(config.SkinInfo.Name, Is.EqualTo($"{skinName} [{filename[..^4]}]"),
+                        "Decoded name should match expected value");
+                    Assert.That(config.SkinInfo.Creator, Is.EqualTo(skinAuthor),
+                        "Decoded author should match expected value");
+                }
+
+                using (var stream = fileStorage.GetStream(skinFile!.File.GetStoragePath()))
+                using (var reader = new StreamReader(stream))
+                {
+                    string content = reader.ReadToEnd();
+
+                    string[] lines = content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                    int generalSectionCount = 0;
+
+                    // count [General] sections by line-by-line parsing
+                    foreach (string rawLine in lines)
+                    {
+                        string line = rawLine.Trim();
+
+                        if (line.Equals(@"[General]", StringComparison.Ordinal))
+                        {
+                            generalSectionCount++;
+                        }
+                    }
+
+                    Assert.That(generalSectionCount, Is.EqualTo(1),
+                        $"[General] section should appear exactly once, but found {generalSectionCount}.\nFile content:\n{content}");
+                }
+            });
+        });
+
         private void assertCorrectMetadata(Live<SkinInfo> import1, string name, string creator, decimal version, OsuGameBase osu)
         {
             import1.PerformRead(i =>
